@@ -1,0 +1,94 @@
+import cv2
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import Sequential, load_model
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense
+from tensorflow.keras.datasets import mnist
+from tensorflow.keras.utils import to_categorical
+import os
+
+# -----------------------
+# Load or train the model
+# -----------------------
+def load_or_train_model():
+    if os.path.exists("mnist_cnn.h5"):
+        return load_model("mnist_cnn.h5")
+    else:
+        (x_train, y_train), (x_test, y_test) = mnist.load_data()
+        x_train = x_train.reshape(-1, 28, 28, 1).astype('float32') / 255
+        x_test = x_test.reshape(-1, 28, 28, 1).astype('float32') / 255
+        y_train = to_categorical(y_train, 10)
+        y_test = to_categorical(y_test, 10)
+
+        model = Sequential([
+            Conv2D(32, (3, 3), activation='relu', input_shape=(28, 28, 1)),
+            MaxPooling2D(2, 2),
+            Conv2D(64, (3, 3), activation='relu'),
+            MaxPooling2D(2, 2),
+            Flatten(),
+            Dense(128, activation='relu'),
+            Dense(10, activation='softmax')
+        ])
+
+        model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+        model.fit(x_train, y_train, epochs=5, validation_data=(x_test, y_test), verbose=2)
+        model.save("mnist_cnn.h5")
+        return model
+
+model = load_or_train_model()
+
+# -----------------------
+# Preprocessing function
+# -----------------------
+def preprocess(img):
+    img = cv2.resize(img, (28, 28), interpolation=cv2.INTER_AREA)
+    img = cv2.GaussianBlur(img, (5, 5), 0)
+    img = cv2.threshold(img, 50, 255, cv2.THRESH_BINARY_INV)[1]
+    img = img.astype('float32') / 255.0
+    return img.reshape(1, 28, 28, 1)
+
+# -----------------------
+# Drawing Setup
+# -----------------------
+canvas = np.zeros((280, 280), dtype=np.uint8)
+drawing = False
+prev_point = None
+
+def draw(event, x, y, flags, param):
+    global drawing, prev_point
+    if event == cv2.EVENT_LBUTTONDOWN:
+        drawing = True
+        prev_point = (x, y)
+    elif event == cv2.EVENT_MOUSEMOVE and drawing:
+        if prev_point:
+            cv2.line(canvas, prev_point, (x, y), 255, thickness=16, lineType=cv2.LINE_AA)
+        prev_point = (x, y)
+    elif event == cv2.EVENT_LBUTTONUP:
+        drawing = False
+        prev_point = None
+
+cv2.namedWindow("Draw a Digit")
+cv2.setMouseCallback("Draw a Digit", draw)
+
+# -----------------------
+# Main Loop
+# -----------------------
+while True:
+    display = canvas.copy()
+    cv2.imshow("Draw a Digit", display)
+    key = cv2.waitKey(1) & 0xFF
+
+    if key == ord('c'):
+        canvas = np.zeros((280, 280), dtype=np.uint8)
+    elif key == ord('p'):
+        processed = preprocess(canvas)
+        prediction = model.predict(processed, verbose=0)
+        digit = np.argmax(prediction)
+        print(f"Prediction: {digit}")
+        cv2.putText(display, f"Prediction: {digit}", (10, 270), cv2.FONT_HERSHEY_SIMPLEX, 0.9, 255, 2)
+        cv2.imshow("Draw a Digit", display)
+        cv2.waitKey(1000)
+    elif key == ord('q'):
+        break
+
+cv2.destroyAllWindows()
